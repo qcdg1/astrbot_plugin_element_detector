@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>要素察觉 · 规则管理</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    margin: 0; padding: 24px; background: #f5f6f8; color: #222;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: #888; font-size: 13px; margin-bottom: 20px; }
+  .toolbar {
+    display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+    margin-bottom: 20px;
+  }
+  button {
+    padding: 8px 18px; font-size: 14px; cursor: pointer;
+    border: 1px solid #d0d4da; border-radius: 8px; background: #fff; color: #333;
+    transition: background .15s;
+  }
+  button:hover { background: #eef0f3; }
+  button.primary { background: #4a90e2; border-color: #4a90e2; color: #fff; }
+  button.primary:hover { background: #3c7ec7; }
+  button.danger { color: #d9534f; border-color: #e7b4b2; }
+  button.danger:hover { background: #fbeceb; }
+
+  .group-title {
+    font-size: 15px; font-weight: 600; margin: 8px 0 10px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .group-title .count {
+    background: #e4e7ec; color: #555; border-radius: 10px;
+    padding: 1px 8px; font-size: 12px; font-weight: 400;
+  }
+
+  .card {
+    background: #fff; border: 1px solid #e3e6ea; border-radius: 10px;
+    padding: 14px 16px; margin-bottom: 10px;
+    display: flex; justify-content: space-between; align-items: flex-start;
+    gap: 12px; transition: box-shadow .15s;
+  }
+  .card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+  .card-main { flex: 1; min-width: 0; }
+  .card-title {
+    font-size: 15px; font-weight: 600; margin-bottom: 6px;
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  }
+  .tag {
+    font-size: 11px; padding: 1px 7px; border-radius: 4px;
+    font-weight: 400; line-height: 1.6;
+  }
+  .tag.prio { background: #f0eefb; color: #6a5acd; }
+  .card-meta {
+    font-size: 13px; color: #555; line-height: 1.75;
+    word-break: break-all;
+  }
+  .card-meta .label { color: #999; margin-right: 4px; }
+  .card-actions { display: flex; gap: 6px; flex-shrink: 0; }
+  .empty {
+    text-align: center; color: #999; padding: 30px; background: #fff;
+    border: 1px dashed #d5d9df; border-radius: 10px; font-size: 13px;
+  }
+
+  .modal-mask {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.35);
+    display: none; align-items: center; justify-content: center; z-index: 100;
+  }
+  .modal-mask.open { display: flex; }
+  .modal {
+    background: #fff; border-radius: 12px; padding: 22px 24px;
+    width: 560px; max-width: 92vw; max-height: 88vh; overflow: auto;
+  }
+  .modal h3 { margin: 0 0 18px; font-size: 16px; }
+  .field { margin-bottom: 14px; }
+  .field label { display: block; font-size: 13px; color: #555; margin-bottom: 5px; }
+  .field input, .field textarea {
+    width: 100%; padding: 8px 10px; border: 1px solid #d0d4da;
+    border-radius: 7px; font-size: 13px; font-family: inherit;
+  }
+  .field textarea { height: 120px; font-family: ui-monospace, monospace; resize: vertical; }
+  .field .hint { font-size: 12px; color: #999; margin-top: 4px; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+
+  #toast {
+    position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%);
+    background: rgba(30,30,30,0.9); color: #fff; padding: 10px 20px;
+    border-radius: 8px; font-size: 13px; opacity: 0; pointer-events: none;
+    transition: opacity .25s; z-index: 200;
+  }
+  #toast.show { opacity: 1; }
+
+  .io-panel {
+    background: #fff; border: 1px solid #e3e6ea; border-radius: 10px;
+    padding: 16px; margin-bottom: 20px;
+  }
+  .io-panel textarea {
+    width: 100%; height: 160px; font-family: ui-monospace, monospace;
+    font-size: 12px; padding: 10px; border: 1px solid #d0d4da;
+    border-radius: 7px; resize: vertical;
+  }
+  .io-panel .row { margin-top: 10px; display: flex; gap: 10px; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+
+<h1>要素察觉 · 规则管理</h1>
+<div class="sub">所有规则在此维护。同群同关键词按优先级取最高，优先级相同取先添加的。</div>
+
+<div class="io-panel">
+  <textarea id="io-text" placeholder="这里显示导出的 JSON；也可以粘贴 JSON 后点「导入」"></textarea>
+  <div class="row">
+    <button id="btn-export">导出全部规则</button>
+    <button id="btn-import-append" class="primary">导入（追加）</button>
+    <button id="btn-import-replace">导入（覆盖）</button>
+    <button id="btn-clear" class="danger">清空全部规则</button>
+  </div>
+</div>
+
+<div class="toolbar">
+  <button id="btn-add" class="primary">+ 新增规则</button>
+  <button id="btn-refresh">刷新</button>
+</div>
+
+<div class="group-title">全部规则 <span class="count" id="rules-count">0</span></div>
+<div id="rules-area"></div>
+
+<div class="modal-mask" id="modal-mask">
+  <div class="modal">
+    <h3 id="modal-title">新增规则</h3>
+    <div class="field">
+      <label>规则名称</label>
+      <input id="f-name" placeholder="例如：晚安规则" />
+    </div>
+    <div class="field">
+      <label>群号</label>
+      <input id="f-group" placeholder="例如：123456789|987654321" />
+      <div class="hint">可用 | 分隔多个群号</div>
+    </div>
+    <div class="field">
+      <label>关键词</label>
+      <input id="f-keyword" placeholder="例如：晚安|早安" />
+      <div class="hint">可用 | 分隔多个关键词</div>
+    </div>
+    <div class="field">
+      <label>回复池（每行一条）</label>
+      <textarea id="f-replies" placeholder="晚安好梦~&#10;早点睡吧"></textarea>
+    </div>
+    <div class="field">
+      <label>优先级</label>
+      <input id="f-priority" type="number" value="0" />
+      <div class="hint">数值越大优先级越高</div>
+    </div>
+    <div class="modal-actions">
+      <button id="btn-cancel">取消</button>
+      <button id="btn-save" class="primary">保存</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script type="module">
+const bridge = window.AstrBotPluginPage;
+await bridge.ready();
+
+const $ = (id) => document.getElementById(id);
+const rulesArea = $('rules-area');
+const ioText = $('io-text');
+
+let state = { rules: [] };
+let editingIndex = -1;
+
+function toast(msg) {
+  const t = $('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.classList.remove('show'), 2200);
+}
+function unwrap(res) { return res && res.data !== undefined ? res.data : res; }
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, (c) => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[c]));
+}
+
+function renderCard(rule, index) {
+  const name = rule.rule_name || '(未命名)';
+  const repliesPreview = rule.replies.join(' / ');
+  const prio = rule.priority ?? 0;
+  return `
+    <div class="card">
+      <div class="card-main">
+        <div class="card-title">
+          <span>${esc(name)}</span>
+          <span class="tag prio">优先级 ${prio}</span>
+        </div>
+        <div class="card-meta">
+          <div><span class="label">群号：</span>${esc(rule.group_id)}</div>
+          <div><span class="label">关键词：</span>${esc(rule.keyword)}</div>
+          <div><span class="label">回复池（${rule.replies.length}）：</span>${esc(repliesPreview)}</div>
+        </div>
+      </div>
+      <div class="card-actions">
+        <button data-action="edit" data-index="${index}">编辑</button>
+        <button data-action="delete" data-index="${index}" class="danger">删除</button>
+      </div>
+    </div>`;
+}
+
+function render() {
+  const rules = state.rules;
+  $('rules-count').textContent = rules.length;
+  if (rules.length === 0) {
+    rulesArea.innerHTML = `<div class="empty">暂无规则，点「新增规则」添加。</div>`;
+    return;
+  }
+  rulesArea.innerHTML = rules.map((r, i) => renderCard(r, i)).join('');
+}
+
+async function loadRules() {
+  try {
+    const res = unwrap(await bridge.apiGet('list_rules'));
+    state.rules = res.rules || [];
+    render();
+  } catch (e) {
+    toast('加载失败：' + e.message);
+  }
+}
+
+function openModal(index) {
+  editingIndex = index;
+  if (index === -1) {
+    $('modal-title').textContent = '新增规则';
+    $('f-name').value = '';
+    $('f-group').value = '';
+    $('f-keyword').value = '';
+    $('f-replies').value = '';
+    $('f-priority').value = 0;
+  } else {
+    const r = state.rules[index];
+    $('modal-title').textContent = '编辑规则';
+    $('f-name').value = r.rule_name || '';
+    $('f-group').value = r.group_id || '';
+    $('f-keyword').value = r.keyword || '';
+    $('f-replies').value = (r.replies || []).join('\n');
+    $('f-priority').value = r.priority ?? 0;
+  }
+  $('modal-mask').classList.add('open');
+}
+function closeModal() { $('modal-mask').classList.remove('open'); }
+
+async function saveModal() {
+  const replies = $('f-replies').value
+    .split('\n').map(s => s.trim()).filter(Boolean);
+  const rule = {
+    rule_name: $('f-name').value.trim(),
+    group_id: $('f-group').value.trim(),
+    keyword: $('f-keyword').value.trim(),
+    replies,
+    priority: parseInt($('f-priority').value, 10) || 0,
+  };
+  if (!rule.group_id || !rule.keyword || rule.replies.length === 0) {
+    toast('群号、关键词、至少一条回复不能为空');
+    return;
+  }
+  try {
+    if (editingIndex === -1) {
+      await bridge.apiPost('add_rule', { rule });
+      toast('已新增');
+    } else {
+      await bridge.apiPost('update_rule', { index: editingIndex, rule });
+      toast('已保存');
+    }
+    closeModal();
+    await loadRules();
+  } catch (e) {
+    toast('保存失败：' + e.message);
+  }
+}
+
+rulesArea.addEventListener('click', async (ev) => {
+  const btn = ev.target.closest('button[data-action]');
+  if (!btn) return;
+  const action = btn.dataset.action;
+  const index = parseInt(btn.dataset.index, 10);
+
+  if (action === 'edit') {
+    openModal(index);
+  } else if (action === 'delete') {
+    if (!confirm('确定删除这条规则吗？')) return;
+    try {
+      await bridge.apiPost('delete_rule', { index });
+      toast('已删除');
+      await loadRules();
+    } catch (e) { toast('删除失败：' + e.message); }
+  }
+});
+
+$('btn-add').addEventListener('click', () => openModal(-1));
+$('btn-cancel').addEventListener('click', closeModal);
+$('btn-save').addEventListener('click', saveModal);
+$('btn-refresh').addEventListener('click', loadRules);
+
+$('btn-export').addEventListener('click', async () => {
+  try {
+    const res = unwrap(await bridge.apiGet('export_rules'));
+    ioText.value = JSON.stringify(res.rules, null, 2);
+    toast(`已导出 ${res.rules.length} 条`);
+  } catch (e) { toast('导出失败：' + e.message); }
+});
+
+$('btn-import-append').addEventListener('click', () => doImport('append'));
+$('btn-import-replace').addEventListener('click', () => {
+  if (confirm('将清空当前全部规则后重新导入，确定吗？')) doImport('replace');
+});
+
+async function doImport(mode) {
+  const raw = ioText.value.trim();
+  if (!raw) { toast('请先粘贴 JSON'); return; }
+  let rules;
+  try { rules = JSON.parse(raw); } catch (e) { toast('JSON 解析失败：' + e.message); return; }
+  try {
+    const res = unwrap(await bridge.apiPost('import_rules', { rules, mode }));
+    toast(`导入 ${res.imported} 条，规则总数 ${res.total}`);
+    await loadRules();
+  } catch (e) { toast('导入失败：' + e.message); }
+}
+
+$('btn-clear').addEventListener('click', async () => {
+  if (!confirm('确定清空全部规则吗？此操作不可恢复。')) return;
+  try {
+    const res = unwrap(await bridge.apiPost('clear_rules', {}));
+    toast(`已清空 ${res.cleared} 条`);
+    await loadRules();
+  } catch (e) { toast('清空失败：' + e.message); }
+});
+
+await loadRules();
+</script>
+</body>
+</html>

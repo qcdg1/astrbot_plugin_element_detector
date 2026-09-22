@@ -1,0 +1,8 @@
+{
+  "block_llm": {
+    "description": "触发后是否阻止 LLM 继续处理该消息",
+    "type": "bool",
+    "default": true,
+    "hint": "开启后机器人只发关键词回复，不再走 LLM。所有规则请到插件页面的「规则管理」里维护"
+  }
+}

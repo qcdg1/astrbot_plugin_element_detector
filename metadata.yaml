@@ -1,0 +1,6 @@
+name: astrbot_plugin_element_detector
+display_name: 要素察觉
+desc: 群聊中出现关键词时立刻随机回一句。规则全部在插件页面里维护。
+version: v1.0.0
+author: qcdg
+repo: "https://github.com/qcdg1/astrbot_plugin_element_detector"
