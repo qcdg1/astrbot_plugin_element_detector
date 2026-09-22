@@ -1,4 +1,6 @@
+import json
 import random
+from pathlib import Path
 from sys import maxsize
 from typing import Dict, List, Optional, Tuple
 
@@ -8,15 +10,17 @@ from astrbot.api.star import Context, Star, register
 from astrbot.api.web import error_response, json_response, request
 from astrbot.api import logger
 
-KV_KEY_RULES = "element_detector_rules"
 PLUGIN_NAME = "astrbot_plugin_element_detector"
+DATA_DIR_NAME = PLUGIN_NAME                # 数据子目录名，与插件全名一致
+RULES_FILE_NAME = "rules.json"
+LEGACY_KV_KEY = "element_detector_rules"   # 旧版本用的 KV key，仅用于一次性迁移
 
 
 @register(
     PLUGIN_NAME,
     "your_name",
     "要素察觉：群聊中出现关键词时立刻随机回复。规则全部在插件页面里维护。",
-    "7.0.0",
+    "7.1.0",
     "https://github.com/your_name/astrbot_plugin_element_detector",
 )
 class ElementDetectorPlugin(Star):
@@ -26,9 +30,10 @@ class ElementDetectorPlugin(Star):
 
         self.block_llm: bool = self.config.get("block_llm", True)
 
-        # 全部规则都存在这里（KV 持久化）
+        # 全部规则（持久化到文件）
         self.rules: List[dict] = []
         self._kv_loaded = False
+        self._rules_file: Optional[Path] = None
 
         # group_id -> {keyword: [(priority, [replies]), ...]}
         self.rules_by_group: Dict[str, Dict[str, List[Tuple[int, List[str]]]]] = {}
@@ -48,30 +53,77 @@ class ElementDetectorPlugin(Star):
         logger.info("[要素察觉] Web API 注册完成")
         logger.info(
             f"[要素察觉] 加载完成 | 阻止LLM={'是' if self.block_llm else '否'} | "
-            f"规则将在首次消息或页面访问时从 KV 加载"
+            f"规则文件将在首次访问时初始化"
         )
 
     # ------------------------------------------------------------------
-    # KV
+    # 路径 & 存储
     # ------------------------------------------------------------------
+    def _resolve_rules_file(self) -> Path:
+        """返回规则文件的绝对路径。优先 AstrBot data 目录，失败则退回插件目录。"""
+        try:
+            from astrbot.core.utils.astrbot_path import get_astrbot_data_path
+            base = Path(get_astrbot_data_path())
+        except Exception:
+            base = Path.cwd() / "data"
+
+        target_dir = base / "plugin_data" / DATA_DIR_NAME
+        try:
+            target_dir.mkdir(parents=True, exist_ok=True)
+            return target_dir / RULES_FILE_NAME
+        except Exception as e:
+            logger.warning(f"[要素察觉] 数据目录不可写，退回插件目录：{e}")
+            return Path(__file__).parent / RULES_FILE_NAME
+
+    def _save_rules_sync(self):
+        """同步写文件。"""
+        try:
+            rules_file = self._rules_file or self._resolve_rules_file()
+            self._rules_file = rules_file
+            rules_file.write_text(
+                json.dumps(self.rules, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except Exception as e:
+            logger.error(f"[要素察觉] 规则文件写入失败: {e}")
+
     async def _ensure_kv_loaded(self):
+        """从文件加载规则；首次加载时尝试从旧 KV 一次性迁移。"""
         if self._kv_loaded:
             return
         self._kv_loaded = True
-        try:
-            data = await self.get_kv_data(KV_KEY_RULES, [])
-            if isinstance(data, list):
-                self.rules = data
-                self._rebuild_rules()
-                logger.info(f"[要素察觉] 从 KV 加载了 {len(self.rules)} 条规则")
-        except Exception as e:
-            logger.error(f"[要素察觉] KV 加载失败: {e}")
 
-    async def _save_rules(self):
+        rules_file = self._resolve_rules_file()
+        self._rules_file = rules_file
+
+        # 1. 优先从文件读
+        if rules_file.exists():
+            try:
+                data = json.loads(rules_file.read_text(encoding="utf-8"))
+                if isinstance(data, list):
+                    self.rules = data
+                    self._rebuild_rules()
+                    logger.info(f"[要素察觉] 从 {rules_file} 加载了 {len(self.rules)} 条规则")
+                    return
+            except Exception as e:
+                logger.error(f"[要素察觉] 规则文件读取失败: {e}")
+
+        # 2. 文件不存在，尝试从旧 KV 迁移一次
         try:
-            await self.put_kv_data(KV_KEY_RULES, self.rules)
+            legacy = await self.get_kv_data(LEGACY_KV_KEY, None)
+            if isinstance(legacy, list) and legacy:
+                self.rules = legacy
+                self._save_rules_sync()
+                self._rebuild_rules()
+                logger.info(f"[要素察觉] 已从旧 KV 迁移 {len(self.rules)} 条规则到 {rules_file}")
+                return
         except Exception as e:
-            logger.error(f"[要素察觉] KV 保存失败: {e}")
+            logger.debug(f"[要素察觉] 旧 KV 迁移尝试失败（正常）: {e}")
+
+        # 3. 全新安装
+        self.rules = []
+        self._rebuild_rules()
+        logger.info(f"[要素察觉] 全新安装，规则文件位于 {rules_file}")
 
     # ------------------------------------------------------------------
     # 规则
@@ -180,7 +232,7 @@ class ElementDetectorPlugin(Star):
         if not norm:
             return error_response("规则字段不完整（需要群号、关键词、至少一条回复）")
         self.rules.append(norm)
-        await self._save_rules()
+        self._save_rules_sync()
         self._rebuild_rules()
         return json_response({"ok": True, "index": len(self.rules) - 1})
 
@@ -197,7 +249,7 @@ class ElementDetectorPlugin(Star):
         if not norm:
             return error_response("规则字段不完整")
         self.rules[index] = norm
-        await self._save_rules()
+        self._save_rules_sync()
         self._rebuild_rules()
         return json_response({"ok": True})
 
@@ -211,7 +263,7 @@ class ElementDetectorPlugin(Star):
         if index < 0 or index >= len(self.rules):
             return error_response("规则索引越界")
         self.rules.pop(index)
-        await self._save_rules()
+        self._save_rules_sync()
         self._rebuild_rules()
         return json_response({"ok": True})
 
@@ -234,7 +286,7 @@ class ElementDetectorPlugin(Star):
             self.rules.append(norm)
             added += 1
 
-        await self._save_rules()
+        self._save_rules_sync()
         self._rebuild_rules()
         return json_response({"imported": added, "total": len(self.rules)})
 
@@ -246,7 +298,7 @@ class ElementDetectorPlugin(Star):
         await self._ensure_kv_loaded()
         count = len(self.rules)
         self.rules = []
-        await self._save_rules()
+        self._save_rules_sync()
         self._rebuild_rules()
         return json_response({"cleared": count})
 
